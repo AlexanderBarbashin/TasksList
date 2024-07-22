@@ -12,4 +12,4 @@ phases:
        - pip3 install boto3
   build:
     commands:
-       - python3 update_lambda_functions.py
+       - python3 lambda_from_github/update_lambda_functions.py
