@@ -30,7 +30,8 @@ def get_task(**kwargs):
         tasks = response['Items']
         if tasks:
             # return {'Tasks': tasks}
-            return {'Tasks': tasks, 'Test': 'Hello from codebuild!'}
+            # return {'Tasks': tasks, 'Test': 'Hello from codebuild!'}
+            return {'Tasks': tasks, 'Test': 'Hello from codebuild and code pipeline!!!'}
         else:
             return {'Empty': 'There isn\'t any tasks now'}
 
