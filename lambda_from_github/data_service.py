@@ -29,7 +29,8 @@ def get_task(**kwargs):
         response = table.scan()
         tasks = response['Items']
         if tasks:
-            return {'Tasks': tasks}
+            # return {'Tasks': tasks}
+            return {'Tasks': tasks, 'Test': 'Hello from codebuild!'}
         else:
             return {'Empty': 'There isn\'t any tasks now'}
 
