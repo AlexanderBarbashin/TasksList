@@ -11,14 +11,18 @@ def update_lambda_functions(lambda_client):
         my_zip.write('api_service.py')
     with ZipFile('lambda_data_service.zip', 'w') as my_zip:
         my_zip.write('data_service.py')
-    lambda_client.update_function_code(
-        FunctionName=lambda_api_service_function_name,
-        ZipFile='lambda_api_service.zip'
-    )
-    lambda_client.update_function_code(
-        FunctionName=lambda_data_service_function_name,
-        ZipFile='lambda_data_service.zip'
-    )
+    with open('lambda_api_service.zip', 'rb') as zip_file:
+        api_zip_code = zip_file.read()
+        lambda_client.update_function_code(
+            FunctionName=lambda_api_service_function_name,
+            ZipFile=api_zip_code
+        )
+    with open('lambda_data_service.zip', 'rb') as zip_file:
+        data_zip_code = zip_file.read()
+        lambda_client.update_function_code(
+            FunctionName=lambda_data_service_function_name,
+            ZipFile=data_zip_code
+        )
 
 
 if __name__ == "__main__":
