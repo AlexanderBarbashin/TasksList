@@ -11,6 +11,7 @@ table = dynamodb.Table(dynamodb_table_name)
 
 
 def get_task_by_id(task_id):
+    print(123)
     response = table.get_item(
         Key={
             'id': task_id
