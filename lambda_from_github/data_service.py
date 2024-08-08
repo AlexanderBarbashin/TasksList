@@ -1,102 +1,148 @@
+import os
 import json
+import time
 import boto3
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Key, Attr
 import uuid
 
 dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table('Tasks')
+dynamodb_table_name = os.environ.get('DynamoDBTableName')
+table = dynamodb.Table(dynamodb_table_name)
 
 
-def get_task_by_id(id):
+def get_task_by_id(task_id):
     response = table.get_item(
         Key={
-            'id': id
+            'id': task_id
         }
     )
-    task = response['Item']
-    return task
+    try:
+        task = response['Item']
+        return task
+    except KeyError:
+        print('Response from query task by id: ', response)
 
 
-def get_task(**kwargs):
-    task_id = kwargs.get('task_id')
-    if task_id:
-        try:
-            task = get_task_by_id(task_id)
-            return task
-        except KeyError:
-            return {'Error': f'Task with id {task_id} not found!'}
+def search_tasks(body):
+    search_by = body.get('search_by')
+    key_word = body.get('key_word')
+    response = table.scan(
+        FilterExpression=Attr(search_by).contains(key_word)
+    )
+    tasks = response['Items']
+    if tasks:
+        return {'Tasks': tasks}
     else:
-        response = table.scan()
-        tasks = response['Items']
-        if tasks:
-            # return {'Tasks': tasks}
-            # return {'Tasks': tasks, 'Test': 'Hello from codebuild!'}
-            return {'Tasks': tasks, 'Test': 'Hello from codebuild and code pipeline!!!'}
+        return {'Empty': f'There isn\'t any tasks now with {search_by} contains {key_word}'}
+
+
+def get_all_tasks(body):
+    tasks_list = []
+    response = {'LastEvaluatedKey': False}
+    while 'LastEvaluatedKey' in response:
+        if response['LastEvaluatedKey']:
+            response = table.scan(
+                ExclusiveStartKey=response['LastEvaluatedKey']
+            )
         else:
-            return {'Empty': 'There isn\'t any tasks now'}
+            response = table.scan()
+        tasks = response['Items']
+        tasks_list.extend(tasks)
+    return {'Tasks': tasks_list}
 
 
-def add_task(**kwargs):
+def create_task(body):
     task_id = str(uuid.uuid4())
-    new_task = kwargs.get('body')
+    title = body.get('title')
+    description = body.get('description')
+    created_at = str(time.time())
     table.put_item(
         Item={
             'id': task_id,
-            'title': new_task['title'],
-            'description': new_task['description'],
-            'task_status': new_task['task_status'],
-            'created_at': new_task['created_at']
+            'title': title,
+            'description': description,
+            'task_status': 'pending',
+            'created_at': created_at
         }
     )
-    return {'New task id': task_id}
 
 
-def update_task(**kwargs):
-    task_id = kwargs.get('task_id')
-    try:
-        task = get_task_by_id(task_id)
-    except KeyError:
-        return {'Error': f'Task with id {task_id} not found!'}
-    updated_task = kwargs.get('body')
-    table.update_item(
-        Key={
-            'id': task_id
-        },
-        UpdateExpression='SET task_status = :val1, updated_at = :val2',
-        ExpressionAttributeValues={
-            ':val1': updated_task['task_status'],
-            ':val2': updated_task['updated_at']
-        }
-    )
-    return {'Successfully': f'Task with id {task_id} was updated'}
+def get_task(body):
+    task_id = body.get('task_id')
+    task = get_task_by_id(task_id)
+    if task:
+        return {'Task': task}
 
 
-def delete_task(**kwargs):
-    task_id = kwargs.get('task_id')
-    try:
-        task = get_task_by_id(task_id)
-    except KeyError:
-        return {'Error': f'Task with id {task_id} not found!'}
+def add_tag(body):
+    task_id = body.get('task_id')
+    tag = body.get('tag')
+    task = get_task_by_id(task_id)
+    if task:
+        tags = task.get('tags')
+        if tags:
+            if tags.count(tag) > 0:
+                print(f'Tag {tag} already added to task with id: {task_id}!')
+            else:
+                tags.append(tag)
+        else:
+            tags = [tag]
+        table.update_item(
+            Key={
+                'id': task_id
+            },
+            UpdateExpression='SET tags = :val1',
+            ExpressionAttributeValues={
+                ':val1': tags
+            }
+        )
+
+
+def update_task(body):
+    task_id = body.get('task_id')
+    new_task_status = body.get('new_task_status')
+    task = get_task_by_id(task_id)
+    if task:
+        updated_at = str(time.time())
+        table.update_item(
+            Key={
+                'id': task_id
+            },
+            UpdateExpression='SET task_status = :val1, updated_at = :val2',
+            ExpressionAttributeValues={
+                ':val1': new_task_status,
+                ':val2': updated_at
+            }
+        )
+
+
+def delete_task(body):
+    task_id = body.get('task_id')
     table.delete_item(
         Key={
             'id': task_id
         }
     )
-    return {'Successfully': f'Task with id {task_id} was deleted'}
 
 
-ACTIONS = {
-    'GET': get_task,
-    'POST': add_task,
-    'PUT': update_task,
-    'DELETE': delete_task
+DATA_FUNCTIONS = {
+    'search_tasks': search_tasks,
+    'get_all_tasks': get_all_tasks,
+    'create_task': create_task,
+    'get_task': get_task,
+    'add_tag': add_tag,
+    'update_task': update_task,
+    'delete_task': delete_task
 }
 
 
 def lambda_handler(event, context):
-    action = event.get('http_method')
-    task_id = event.get('id')
+    records = event.get('Records')
+    if records:
+        event = json.loads(records[0].get('body'))
+    print('Event: ', event)
+    data_function_name = event.get('data_function')
     body = event.get('body')
-    db_function = ACTIONS[action]
-    result = db_function(task_id=task_id, body=body)
+    data_function = DATA_FUNCTIONS[data_function_name]
+    result = data_function(body)
     return result
