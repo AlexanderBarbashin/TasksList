@@ -9,6 +9,7 @@ dynamodb = boto3.resource('dynamodb')
 dynamodb_table_name = os.environ.get('DynamoDBTableName')
 table = dynamodb.Table(dynamodb_table_name)
 
+print('Hello from pipeline!')
 
 def get_task_by_id(task_id):
     print(12)
