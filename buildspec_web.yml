@@ -1,0 +1,14 @@
+version: 0.2
+env:
+  variables:
+    AWS_REGION: "eu-central-1"
+    S3_BUCKET_NAME: "bbash-test-cf-bucket"
+
+phases:
+  install:
+    commands:
+       - pip3 install boto3
+       - pip3 install botocore
+  build:
+    commands:
+       - python3 update_main_page.py
