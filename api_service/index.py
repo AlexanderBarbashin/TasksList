@@ -2,8 +2,6 @@ import os
 import json
 import boto3
 
-print('Hello from pipeline!')
-
 lambda_client = boto3.client('lambda')
 sqs_client = boto3.client('sqs')
 
