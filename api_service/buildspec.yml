@@ -13,5 +13,5 @@ phases:
        - pip3 install boto3
   build:
     commands:
-#       - cd lambda_from_github
+       - cd api_service
        - python3 update_lambda_api_function.py
