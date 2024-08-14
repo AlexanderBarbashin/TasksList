@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Training WI</title>
+</head>
+<body>
+    <h1>
+        Welcome to my training simple web interface!
+    </h1>
+    <p>
+        Hello from codepipeline!!!
+    </p>
+    <h2>
+        Get all tasks list from DB
+    </h2>
+    <div>
+        <form id="FormGetTasksList">
+            <p>
+                <label for="select_sort">Sorted by: </label>
+                <select name="select_sort" id="select_sort">
+                    <option value="None">Disabled</option>
+                    <option value="created_at">Creation date</option>
+                    <option value="task_status">Status</option>
+                </select>
+            </p>
+            <p>
+                <label for="reversed">Reverse: </label>
+                <input id="reversed" name="reversed" type="checkbox">
+            </p>
+            <p>
+                <button type="submit">Get</button>
+            </p>
+        </form>
+        <script>
+            document.getElementById('FormGetTasksList').addEventListener('submit', function (event) {
+                event.preventDefault();
+
+                const selectSort = document.getElementById('select_sort').value;
+                const checkbox = document.getElementById('reversed');
+                const reversed = checkbox.checked ? 'on' : 'off';
+
+                const generatedUrl = `https://u3ia5rtwu2.execute-api.eu-central-1.amazonaws.com/dev/tasks?sorted_by=${encodeURIComponent(selectSort)}&reversed=${encodeURIComponent(reversed)}`;
+
+                fetch(generatedUrl, {
+                    method: 'GET'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    const newTab = window.open();
+
+                    newTab.document.write('<html><head><title>Tasks list</title></head>');
+                    newTab.document.write('<body>');
+                    newTab.document.write('<h1>List of all tasks: </h1>');
+                    newTab.document.write('<pre>' + JSON.stringify(data, null, 2) + '</pre>');
+                    newTab.document.write('</body></html>');
+                    newTab.document.close();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+            });
+        </script>
+    </div>
+
+
+    <h2>
+        Get task by ID
+    </h2>
+
+    <div>
+        <form id="FormTaskGet">
+            <p>
+                <label for="task_id_get">ID: </label>
+                <input type="text" id="task_id_get" name="task_id_get" required>
+            </p>
+            <p>
+                <button type="submit">Get</button>
+            </p>
+        </form>
+        <script>
+            document.getElementById('FormTaskGet').addEventListener('submit', function (event) {
+                event.preventDefault();
+
+                const inputData = document.getElementById('task_id_get').value;
+
+                const generatedUrl = `https://u3ia5rtwu2.execute-api.eu-central-1.amazonaws.com/dev/tasks/${encodeURIComponent(inputData)}`;
+
+                fetch(generatedUrl, {
+                    method: 'GET'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    const newTab = window.open();
+
+                    newTab.document.write('<html><head><title>Task</title></head>');
+                    newTab.document.write('<body>');
+                    newTab.document.write('<h1>Task: </h1>');
+                    newTab.document.write('<pre>' + JSON.stringify(data, null, 2) + '</pre>');
+                    newTab.document.write('</body></html>');
+                    newTab.document.close();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+            });
+        </script>
+    </div>
+
+    <h2>
+        Create new task
+    </h2>
+    <div>
+        <form id="FormTaskCreate" action="https://rnfc26t3s5.execute-api.eu-central-1.amazonaws.com/dev/tasks">
+            <p>
+                <label for="title">Title: </label>
+                <input type="text" name="title" id="title" required>
+                <label for="description">Description: </label>
+                <input type="text" name="description" id="description" required>
+            </p>
+            <p>
+                <button type="submit">Create</button>
+            </p>
+        </form>
+        <div id="responseCreateContainer"></div>
+        <script>
+            const formElement = document.getElementById('FormTaskCreate')
+            formElement.addEventListener('submit', function (event) {
+                event.preventDefault();
+
+                const inputData = new FormData(formElement);
+                const title = inputData.get('title');
+                const description = inputData.get('description');
+
+                const url = `https://u3ia5rtwu2.execute-api.eu-central-1.amazonaws.com/dev/tasks`;
+
+                fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ title: title, description: description })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('responseCreateContainer').innerText = 'Response: ' + JSON.stringify(data);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('responseCreateContainer').innerText = 'Error: ' + error;
+                });
+            });
+        </script>
+    </div>
+    <p>
+
+    </p>
+
+    <h2>
+        Update task
+    </h2>
+    <div>
+        <form id="FormTaskUpdate">
+            <p>
+                <label for="task_id_put">ID: </label>
+                <input type="text" id="task_id_put" name="task_id_put" required>
+                <label for="new_task_status">Status: </label>
+                <select name="new_task_status" id="new_task_status">
+                    <option value="in-progress">In progress</option>
+                    <option value="completed">Completed</option>
+                </select>
+            </p>
+            <p>
+                <button type="submit">Update</button>
+            </p>
+        </form>
+        <div id="responseUpdateContainer"></div>
+        <script>
+            document.getElementById('FormTaskUpdate').addEventListener('submit', function (event) {
+                event.preventDefault();
+
+                const inputId = document.getElementById('task_id_put').value;
+                const inputStatus = document.getElementById('new_task_status').value;
+
+                const generatedUrl = `https://u3ia5rtwu2.execute-api.eu-central-1.amazonaws.com/dev/tasks/${encodeURIComponent(inputId)}`;
+
+                fetch(generatedUrl, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ task_status: inputStatus })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('responseUpdateContainer').innerText = 'Response: ' + JSON.stringify(data);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('responseUpdateContainer').innerText = 'Error: ' + error;
+                });
+            });
+        </script>
+    </div>
+
+    <h2>
+        Delete task
+    </h2>
+    <div>
+        <form id="FormTaskDelete">
+            <p>
+                <label for="task_id_delete">ID: </label>
+                <input type="text" id="task_id_delete" name="task_id_delete" required>
+            </p>
+            <p>
+                <button type="submit">Delete</button>
+            </p>
+        </form>
+        <div id="responseDeleteContainer"></div>
+        <script>
+            document.getElementById('FormTaskDelete').addEventListener('submit', function (event) {
+                event.preventDefault();
+
+                const inputData = document.getElementById('task_id_delete').value;
+
+                const generatedUrl = `https://u3ia5rtwu2.execute-api.eu-central-1.amazonaws.com/dev/tasks/${encodeURIComponent(inputData)}`;
+
+                fetch(generatedUrl, {
+                    method: 'DELETE'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('responseDeleteContainer').innerText = 'Response: ' + JSON.stringify(data);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('responseDeleteContainer').innerText = 'Error: ' + error;
+                });
+            });
+        </script>
+    </div>
+
+    <h2>
+        Add tag to task
+    </h2>
+    <div>
+        <form id="FormTagAdd">
+            <p>
+                <label for="task_id_add_tag">ID: </label>
+                <input type="text" id="task_id_add_tag" name="task_id_add_tag" required>
+                <label for="new_tag">Tag: </label>
+                <input type="text" id="new_tag" name="new_tag" required>
+            </p>
+            <p>
+                <button type="submit">Add</button>
+            </p>
+        </form>
+        <div id="responseAddTag"></div>
+        <script>
+            document.getElementById('FormTagAdd').addEventListener('submit', function (event) {
+                event.preventDefault();
+
+                const inputId = document.getElementById('task_id_add_tag').value;
+                const inputTag = document.getElementById('new_tag').value;
+
+                const generatedUrl = `https://u3ia5rtwu2.execute-api.eu-central-1.amazonaws.com/dev/tasks/${encodeURIComponent(inputId)}`;
+
+                fetch(generatedUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ tag: inputTag })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('responseAddTag').innerText = 'Response: ' + JSON.stringify(data);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('responseAddTag').innerText = 'Error: ' + error;
+                });
+            });
+        </script>
+    </div>
+
+    <h2>
+        Search tasks
+    </h2>
+    <div>
+        <form id="FormSearch">
+            <p>
+                <label for="search_by">Search by: </label>
+                <select name="search_by" id="search_by">
+                    <option value="title">Title</option>
+                    <option value="description">Description</option>
+                </select>
+                <label for="key_word">Key word: </label>
+                <input type="text" name="key_word" id="key_word" required>
+            </p>
+            <p>
+                <button type="submit">Search</button>
+            </p>
+        </form>
+        <script>
+            document.getElementById('FormSearch').addEventListener('submit', function (event) {
+                event.preventDefault();
+
+                const search_by = document.getElementById('search_by').value;
+                const key_word = document.getElementById('key_word').value;
+
+                const generatedUrl = `https://u3ia5rtwu2.execute-api.eu-central-1.amazonaws.com/dev/tasks?search_by=${encodeURIComponent(search_by)}&key_word=${encodeURIComponent(key_word)}`;
+
+                fetch(generatedUrl, {
+                    method: 'GET'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    const newTab = window.open();
+
+                    newTab.document.write('<html><head><title>Found tasks</title></head>');
+                    newTab.document.write('<body>');
+                    newTab.document.write('<h1>Found tasks: </h1>');
+                    newTab.document.write('<pre>' + JSON.stringify(data, null, 2) + '</pre>');
+                    newTab.document.write('</body></html>');
+                    newTab.document.close();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+            });
+        </script>
+    </div>
+</body>
+</html>
