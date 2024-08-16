@@ -2,7 +2,9 @@ version: 0.2
 env:
   variables:
     AWS_REGION: "eu-central-1"
-    S3_BUCKET_NAME: "bbash-test-cf-bucket"
+#    S3_BUCKET_NAME: "bbash-test-cf-bucket"
+  parameter-store:
+    S3_BUCKET_NAME: "S3BucketName"
 
 phases:
   install:
