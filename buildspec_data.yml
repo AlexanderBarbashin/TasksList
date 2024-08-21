@@ -2,10 +2,9 @@ version: 0.2
 env:
   variables:
     AWS_REGION: "eu-central-1"
-#    LAMBDA_FUNC_NAME: "arn:aws:lambda:eu-central-1:730335656503:function:MyTestCFStack-DataServiceLambdaFunction-12BNFn9BPBNo"
     LAMBDA_FUNC_DIR: "data_service"
   parameter-store:
-    LAMBDA_FUNC_NAME: "APILambdaName"
+    LAMBDA_FUNC_NAME: "DataLambdaName"
 
 phases:
   install:
