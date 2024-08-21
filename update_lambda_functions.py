@@ -8,7 +8,7 @@ def update_lambda_function(lambda_client):
     lambda_function_dir = environ['LAMBDA_FUNC_DIR']
     print("Updating lambda function: " + lambda_function_name)
     with ZipFile('index.zip', 'w') as my_zip:
-        my_zip.write(f'{lambda_function_dir}/index.py')
+        my_zip.write(f'{lambda_function_dir}/index.py', arcname='index.py')
     with open('index.zip', 'rb') as zip_file:
         zip_code = zip_file.read()
         lambda_client.update_function_code(
