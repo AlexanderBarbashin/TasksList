@@ -37,7 +37,7 @@
                 const checkbox = document.getElementById('reversed');
                 const reversed = checkbox.checked ? 'on' : 'off';
 
-                const generatedUrl = `https://u3ia5rtwu2.execute-api.eu-central-1.amazonaws.com/dev/tasks?sorted_by=${encodeURIComponent(selectSort)}&reversed=${encodeURIComponent(reversed)}`;
+                const generatedUrl = `https://pqcvcylfuc.execute-api.eu-central-1.amazonaws.com/dev/tasks?sorted_by=${encodeURIComponent(selectSort)}&reversed=${encodeURIComponent(reversed)}`;
 
                 fetch(generatedUrl, {
                     method: 'GET'
@@ -81,7 +81,7 @@
 
                 const inputData = document.getElementById('task_id_get').value;
 
-                const generatedUrl = `https://u3ia5rtwu2.execute-api.eu-central-1.amazonaws.com/dev/tasks/${encodeURIComponent(inputData)}`;
+                const generatedUrl = `https://pqcvcylfuc.execute-api.eu-central-1.amazonaws.com/dev/tasks/${encodeURIComponent(inputData)}`;
 
                 fetch(generatedUrl, {
                     method: 'GET'
@@ -129,7 +129,7 @@
                 const title = inputData.get('title');
                 const description = inputData.get('description');
 
-                const url = `https://u3ia5rtwu2.execute-api.eu-central-1.amazonaws.com/dev/tasks`;
+                const url = `https://pqcvcylfuc.execute-api.eu-central-1.amazonaws.com/dev/tasks`;
 
                 fetch(url, {
                     method: 'POST',
@@ -179,7 +179,7 @@
                 const inputId = document.getElementById('task_id_put').value;
                 const inputStatus = document.getElementById('new_task_status').value;
 
-                const generatedUrl = `https://u3ia5rtwu2.execute-api.eu-central-1.amazonaws.com/dev/tasks/${encodeURIComponent(inputId)}`;
+                const generatedUrl = `https://pqcvcylfuc.execute-api.eu-central-1.amazonaws.com/dev/tasks/${encodeURIComponent(inputId)}`;
 
                 fetch(generatedUrl, {
                     method: 'PUT',
@@ -220,7 +220,7 @@
 
                 const inputData = document.getElementById('task_id_delete').value;
 
-                const generatedUrl = `https://u3ia5rtwu2.execute-api.eu-central-1.amazonaws.com/dev/tasks/${encodeURIComponent(inputData)}`;
+                const generatedUrl = `https://pqcvcylfuc.execute-api.eu-central-1.amazonaws.com/dev/tasks/${encodeURIComponent(inputData)}`;
 
                 fetch(generatedUrl, {
                     method: 'DELETE'
@@ -260,7 +260,7 @@
                 const inputId = document.getElementById('task_id_add_tag').value;
                 const inputTag = document.getElementById('new_tag').value;
 
-                const generatedUrl = `https://u3ia5rtwu2.execute-api.eu-central-1.amazonaws.com/dev/tasks/${encodeURIComponent(inputId)}`;
+                const generatedUrl = `https://pqcvcylfuc.execute-api.eu-central-1.amazonaws.com/dev/tasks/${encodeURIComponent(inputId)}`;
 
                 fetch(generatedUrl, {
                     method: 'POST',
@@ -306,7 +306,7 @@
                 const search_by = document.getElementById('search_by').value;
                 const key_word = document.getElementById('key_word').value;
 
-                const generatedUrl = `https://u3ia5rtwu2.execute-api.eu-central-1.amazonaws.com/dev/tasks?search_by=${encodeURIComponent(search_by)}&key_word=${encodeURIComponent(key_word)}`;
+                const generatedUrl = `https://pqcvcylfuc.execute-api.eu-central-1.amazonaws.com/dev/tasks?search_by=${encodeURIComponent(search_by)}&key_word=${encodeURIComponent(key_word)}`;
 
                 fetch(generatedUrl, {
                     method: 'GET'
