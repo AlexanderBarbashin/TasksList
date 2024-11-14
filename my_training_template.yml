@@ -1,0 +1,2072 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: 'AWS::LanguageExtensions'
+
+Parameters:
+  SQSDeadLetterQueueName:
+    Type: String
+  SQSSourceQueueName:
+    Type: String
+  APIServiceLambdaFunctionName:
+    Type: String
+  DataServiceLambdaFunctionName:
+    Type: String
+  DynamoDBTableName:
+    Type: String
+  APIName:
+    Type: String
+  S3BucketName:
+    Type: String
+  APICodeBuildProjectName:
+    Type: String
+  DataCodeBuildProjectName:
+    Type: String
+  WebCodeBuildProjectName:
+    Type: String
+  SNSSubscriptionEndpoint:
+    Type: String
+
+
+Resources:
+
+  # SQS Queues
+  TaskDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Ref:
+          SQSDeadLetterQueueName
+
+  TaskSourceQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Ref:
+          SQSSourceQueueName
+      RedrivePolicy:
+        deadLetterTargetArn:
+          Fn::GetAtt:
+            - "TaskDeadLetterQueue"
+            - "Arn"
+        maxReceiveCount: 3
+    DependsOn:
+      TaskDeadLetterQueue
+
+
+  # IAM Roles
+  APIServiceLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        - PolicyName: SendMessageToSQSPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: VisualEditor0
+                Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource:
+                  Fn::GetAtt:
+                    - "TaskSourceQueue"
+                    - "Arn"
+              - Sid: VisualEditor1
+                Effect: Allow
+                Action:
+                  - sqs:ListQueues
+                Resource: '*'
+        - PolicyName: InvokeOtherLambdaPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Statement1
+                Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                  - lambda:InvokeAsync
+                Resource:
+                  Fn::GetAtt:
+                    - "DataServiceLambdaFunction"
+                    - "Arn"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      RoleName: LambdaInvokeOtherLambdaAndSendToSQSRole
+    DependsOn:
+      - TaskSourceQueue
+      - DataServiceLambdaFunction
+
+  DataServiceLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: LambdaDynamoDBReadAndWritePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: VisualEditor0
+                Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:Scan
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                Resource:
+                  Fn::GetAtt:
+                    - "TaskDynamoDBTable"
+                    - "Arn"
+        - PolicyName: LambdaReceiveMessageFromSQSPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: VisualEditor0
+                Effect: Allow
+                Action:
+                  - sqs:DeleteMessage
+                  - sqs:ReceiveMessage
+                  - sqs:GetQueueAttributes
+                Resource:
+                  Fn::GetAtt:
+                    - "TaskSourceQueue"
+                    - "Arn"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      RoleName: LambdaDynamoDBAndReceiveFromSQSRole
+    DependsOn:
+      - TaskSourceQueue
+      - TaskDynamoDBTable
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: CodeBuildPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - Fn::Select:
+                    - "0"
+                    - Fn::Split:
+                      - ":*"
+                      - Fn::GetAtt:
+                        - "APICodeBuildProjectLogGroup"
+                        - "Arn"
+                  - Fn::GetAtt:
+                    - "APICodeBuildProjectLogGroup"
+                    - "Arn"
+                  - Fn::Select:
+                    - "0"
+                    - Fn::Split:
+                      - ":*"
+                      - Fn::GetAtt:
+                        - "DataCodeBuildProjectLogGroup"
+                        - "Arn"
+                  - Fn::GetAtt:
+                    - "DataCodeBuildProjectLogGroup"
+                    - "Arn"
+                  - Fn::Select:
+                    - "0"
+                    - Fn::Split:
+                      - ":*"
+                      - Fn::GetAtt:
+                        - "WebCodeBuildProjectLogGroup"
+                        - "Arn"
+                  - Fn::GetAtt:
+                    - "WebCodeBuildProjectLogGroup"
+                    - "Arn"
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketAcl
+                  - s3:GetBucketLocation
+                Resource:
+                  - arn:aws:s3:::codepipeline-${AWS::Region}-*
+              - Effect: Allow
+                Action:
+                  - codebuild:CreateReportGroup
+                  - codebuild:CreateReport
+                  - codebuild:UpdateReport
+                  - codebuild:BatchPutTestCases
+                  - codebuild:BatchPutCodeCoverages
+                Resource:
+                  - Fn::Sub:
+                      - "arn:aws:codebuild:eu-central-1:730335656503:report-group/${APICodeBuildProjectName}-*"
+                      - APICodeBuildProjectName:
+                          Ref:
+                            "APICodeBuildProjectName"
+                  - Fn::Sub:
+                      - "arn:aws:codebuild:eu-central-1:730335656503:report-group/${DataCodeBuildProjectName}-*"
+                      - DataCodeBuildProjectName:
+                          Ref:
+                            "DataCodeBuildProjectName"
+                  - Fn::Sub:
+                      - "arn:aws:codebuild:eu-central-1:730335656503:report-group/${WebCodeBuildProjectName}-*"
+                      - WebCodeBuildProjectName:
+                          Ref:
+                            "WebCodeBuildProjectName"
+              - Effect: Allow
+                Action:
+                  - lambda:UpdateFunctionCode
+                Resource:
+                  - Fn::GetAtt:
+                      - "ApiServiceLambdaFunction"
+                      - "Arn"
+                  - Fn::GetAtt:
+                      - "DataServiceLambdaFunction"
+                      - "Arn"
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameters
+                Resource:
+                  - Fn::Sub:
+                    - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${APILambdaParameterName}
+                    - APILambdaParameterName:
+                        Ref:
+                          "APILambdaName"
+                  - Fn::Sub:
+                    - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DataLambdaParameterName}
+                    - DataLambdaParameterName:
+                        Ref:
+                          "DataLambdaName"
+                  - Fn::Sub:
+                    - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${S3BucketParameterName}
+                    - S3BucketParameterName:
+                        Ref:
+                          "S3BucketNameParameter"
+      RoleName: CFCodeBuildRole
+    DependsOn:
+      - APICodeBuildProjectLogGroup
+      - DataCodeBuildProjectLogGroup
+      - WebCodeBuildProjectLogGroup
+      - ApiServiceLambdaFunction
+      - DataServiceLambdaFunction
+      - APILambdaName
+      - DataLambdaName
+      - S3BucketNameParameter
+
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: CodePipelinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: "*"
+                Condition:
+                  StringEqualsIfExists:
+                    iam:PassedToService:
+                      - cloudformation.amazonaws.com
+                      - elasticbeanstalk.amazonaws.com
+                      - ec2.amazonaws.com
+                      - ecs-tasks.amazonaws.com
+              - Effect: Allow
+                Action:
+                  - codecommit:CancelUploadArchive
+                  - codecommit:GetBranch
+                  - codecommit:GetCommit
+                  - codecommit:GetRepository
+                  - codecommit:GetUploadArchiveStatus
+                  - codecommit:UploadArchive
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - codedeploy:CreateDeployment
+                  - codedeploy:GetApplication
+                  - codedeploy:GetApplicationRevision
+                  - codedeploy:GetDeployment
+                  - codedeploy:GetDeploymentConfig
+                  - codedeploy:RegisterApplicationRevision
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - codestar-connections:UseConnection
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - elasticbeanstalk:*
+                  - ec2:*
+                  - elasticloadbalancing:*
+                  - autoscaling:*
+                  - cloudwatch:*
+                  - s3:*
+                  - sns:*
+                  - cloudformation:*
+                  - rds:*
+                  - sqs:*
+                  - ecs:*
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                  - lambda:ListFunctions
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - opsworks:CreateDeployment
+                  - opsworks:DescribeApps
+                  - opsworks:DescribeCommands
+                  - opsworks:DescribeDeployments
+                  - opsworks:DescribeInstances
+                  - opsworks:DescribeStacks
+                  - opsworks:UpdateApp
+                  - opsworks:UpdateStack
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:UpdateStack
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:SetStackPolicy
+                  - cloudformation:ValidateTemplate
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuildBatches
+                  - codebuild:StartBuildBatch
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - devicefarm:ListProjects
+                  - devicefarm:ListDevicePools
+                  - devicefarm:GetRun
+                  - devicefarm:GetUpload
+                  - devicefarm:CreateUpload
+                  - devicefarm:ScheduleRun
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - servicecatalog:ListProvisioningArtifacts
+                  - servicecatalog:CreateProvisioningArtifact
+                  - servicecatalog:DescribeProvisioningArtifact
+                  - servicecatalog:DeleteProvisioningArtifact
+                  - servicecatalog:UpdateProduct
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - cloudformation:ValidateTemplate
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:DescribeImages
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - states:DescribeExecution
+                  - states:DescribeStateMachine
+                  - states:StartExecution
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - appconfig:StartDeployment
+                  - appconfig:StopDeployment
+                  - appconfig:GetDeployment
+                Resource: "*"
+      RoleName: CFCodePipelineRole
+
+
+# Lambda functions
+  ApiServiceLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Environment:
+        Variables:
+          SQSQueueUrl:
+            Fn::GetAtt:
+              - "TaskSourceQueue"
+              - "QueueUrl"
+          DataServiceFunctionName:
+            Fn::GetAtt:
+              - "DataServiceLambdaFunction"
+              - "Arn"
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      FunctionName:
+        Ref: APIServiceLambdaFunctionName
+      Role:
+        Fn::GetAtt:
+          - "APIServiceLambdaRole"
+          - "Arn"
+      Code:
+        ZipFile: |
+          import os
+          import json
+          import boto3
+          
+          lambda_client = boto3.client('lambda')
+          sqs_client = boto3.client('sqs')
+          
+          sqs_queue_url = os.environ.get('SQSQueueUrl')
+          data_service_function_name = os.environ.get('DataServiceFunctionName')
+          
+          
+          def send_message_to_sqs(data, success_text):
+              response_from_sqs = sqs_client.send_message(
+                  QueueUrl=sqs_queue_url,
+                  MessageBody=json.dumps(data)
+              )
+              status_code = response_from_sqs['ResponseMetadata']['HTTPStatusCode']
+              if status_code == 200: 
+                  return {'Successfully': success_text}
+              else:
+                  print(response_from_sqs)
+                  return {'Error': 'Something going wrong!'}
+          
+          
+          def get_tasks_list(**kwargs):
+              body = kwargs.get('body')
+              search_by = body.get('search_by')
+              key_word = body.get('key_word')
+              if search_by != '' and key_word != '':
+                  data_request = {
+                      'data_function': 'search_tasks',
+                      'body': {
+                      'search_by': search_by,
+                      'key_word': key_word 
+                      }
+                  }
+                  response = lambda_client.invoke(
+                      FunctionName=data_service_function_name,
+                      InvocationType='RequestResponse',
+                      Payload=json.dumps(data_request)
+                  )
+                  result = json.load(response['Payload'])
+                  return result
+              else:
+                  data_request = {
+                      'data_function': 'get_all_tasks'
+                  }
+                  response = lambda_client.invoke(
+                      FunctionName=data_service_function_name,
+                      InvocationType='RequestResponse',
+                      Payload=json.dumps(data_request)
+                  )
+                  result = json.load(response['Payload'])
+                  tasks = result.get('Tasks')
+                  if tasks:
+                      sorted_by = body.get('sorted_by')
+                      if sorted_by != 'None':
+                          reversed = body.get('reversed')
+                          if reversed == 'on':
+                              is_reversed = True
+                          else:
+                              is_reversed = False
+                          tasks.sort(key=lambda task: task[sorted_by], reverse=is_reversed)
+                      return {'Tasks': tasks}
+                  else:
+                      return {'Empty': 'There isn\'t any tasks now'}
+          
+          
+          def create_new_task(**kwargs):
+              body = kwargs.get('body')
+              data_request = {
+                  'data_function': 'create_task',
+                  'body': body
+              }
+              successfull_text = 'Message to create new task added to SQS queue'
+              response_to_web_ui = send_message_to_sqs(data_request, successfull_text)
+              return response_to_web_ui
+          
+          
+          def get_task(**kwargs):
+              task_id = kwargs.get('task_id')
+              data_request = {
+                  'data_function': 'get_task',
+                  'body': {
+                      'task_id': task_id
+                  }
+              }
+              response = lambda_client.invoke(
+                  FunctionName=data_service_function_name,
+                  InvocationType='RequestResponse',
+                  Payload=json.dumps(data_request)
+              )
+              result = json.load(response['Payload'])
+              if result:
+                  task = result.get('Task')
+                  return {'Task': task}
+              else:
+                  return {'Error': f'Task with id: {task_id} not found!'}
+          
+          
+          def add_tag(**kwargs):
+              task_id = kwargs.get('task_id')
+              body = kwargs.get('body')
+              tag = body.get('tag')
+              data_request = {
+                  'data_function': 'add_tag',
+                  'body': {
+                      'task_id': task_id,
+                      'tag': tag
+                  }
+              }
+              successfull_text = 'Message to add new tag to task added to SQS queue'
+              response_to_web_ui = send_message_to_sqs(data_request, successfull_text)
+              return response_to_web_ui
+          
+          
+          def update_task(**kwargs):
+              task_id = kwargs.get('task_id')
+              body = kwargs.get('body')
+              new_task_status = body.get('task_status')
+              data_request = {
+                  'data_function': 'update_task',
+                  'body': {
+                      'task_id': task_id,
+                      'new_task_status': new_task_status
+                  }
+              }
+              successfull_text = 'Message to update task status added to SQS queue'
+              response_to_web_ui = send_message_to_sqs(data_request, successfull_text)
+              return response_to_web_ui
+          
+          
+          def delete_task(**kwargs):
+              task_id = kwargs.get('task_id')
+              data_request = {
+                  'data_function': 'delete_task',
+                  'body': {
+                      'task_id': task_id
+                  }
+              }
+              successfull_text = 'Message to delete task added to SQS queue'
+              response_to_web_ui = send_message_to_sqs(data_request, successfull_text)
+              return response_to_web_ui
+              
+              
+          API_FUNCTIONS = {
+              'GET': get_tasks_list,
+              'POST': create_new_task,
+              'GET/id': get_task,
+              'POST/id': add_tag,
+              'PUT/id': update_task,
+              'DELETE/id': delete_task
+          }
+          
+          
+          def lambda_handler(event, context):
+              print('Event: ', event) 
+              http_method = event.get('http_method') 
+              task_id = event.get('id')
+              body = event.get('body')
+              if isinstance(body, str):
+                  body = json.loads(body)
+              if task_id: 
+                  http_method = http_method + '/id'
+              api_function = API_FUNCTIONS[http_method]
+              result = api_function(task_id=task_id, body=body)
+              return result
+      Timeout: 10
+    DependsOn:
+      - APIServiceLambdaRole
+      - TaskSourceQueue
+      - DataServiceLambdaFunction
+
+  DataServiceLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Environment:
+        Variables:
+          DynamoDBTableName:
+            Ref:
+              "DynamoDBTableName"
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      FunctionName:
+        Ref: DataServiceLambdaFunctionName
+      Role:
+        Fn::GetAtt:
+          - "DataServiceLambdaRole"
+          - "Arn"
+      Code:
+        ZipFile: |
+          import os
+          import json
+          import time
+          import boto3
+          from boto3.dynamodb.conditions import Key, Attr
+          import uuid
+          
+          dynamodb = boto3.resource('dynamodb')
+          dynamodb_table_name = os.environ.get('DynamoDBTableName')
+          table = dynamodb.Table(dynamodb_table_name)
+          
+          
+          def get_task_by_id(task_id):
+              response = table.get_item(
+                  Key={
+                      'id': task_id
+                  }
+              )
+              try:
+                  task = response['Item']
+                  return task
+              except KeyError:
+                  print('Response from query task by id: ', response) 
+          
+          
+          def search_tasks(body):
+              search_by = body.get('search_by')
+              key_word = body.get('key_word')
+              response = table.scan(
+                  FilterExpression=Attr(search_by).contains(key_word)
+              )
+              tasks = response['Items']
+              if tasks:
+                  return {'Tasks': tasks}
+              else:
+                  return {'Empty': f'There isn\'t any tasks now with {search_by} contains {key_word}'}
+          
+          
+          def get_all_tasks(body):
+              tasks_list = []
+              response = {'LastEvaluatedKey': False}
+              while 'LastEvaluatedKey' in response:
+                  if response['LastEvaluatedKey']:
+                      response = table.scan(
+                          ExclusiveStartKey=response['LastEvaluatedKey']
+                      )  
+                  else:
+                      response = table.scan()  
+                  tasks = response['Items']  
+                  tasks_list.extend(tasks)
+              return {'Tasks': tasks_list}
+          
+          
+          def create_task(body):
+              task_id = str(uuid.uuid4())
+              title = body.get('title')
+              description = body.get('description')
+              created_at = str(time.time())
+              table.put_item(
+                  Item={
+                      'id': task_id,
+                      'title': title,
+                      'description': description,
+                      'task_status': 'pending',
+                      'created_at': created_at
+                  }
+              )
+              
+          
+          def get_task(body):
+              task_id = body.get('task_id')
+              task = get_task_by_id(task_id)
+              if task:
+                  return {'Task': task}
+          
+          
+          def add_tag(body):
+              task_id = body.get('task_id')
+              tag = body.get('tag')
+              task = get_task_by_id(task_id)
+              if task:
+                  tags = task.get('tags')
+                  if tags:
+                      if tags.count(tag) > 0:
+                          print(f'Tag {tag} already added to task with id: {task_id}!')
+                      else:
+                          tags.append(tag)
+                  else:
+                      tags = [tag]
+                  table.update_item(
+                      Key={
+                          'id': task_id
+                      },
+                      UpdateExpression='SET tags = :val1',
+                      ExpressionAttributeValues={
+                          ':val1': tags
+                      }
+                  )
+                  
+          
+          def update_task(body):
+              task_id = body.get('task_id')
+              new_task_status = body.get('new_task_status')
+              task = get_task_by_id(task_id)
+              if task:
+                  updated_at = str(time.time())
+                  table.update_item(
+                      Key={
+                          'id': task_id
+                      },
+                      UpdateExpression='SET task_status = :val1, updated_at = :val2',
+                      ExpressionAttributeValues={
+                          ':val1': new_task_status,
+                          ':val2': updated_at
+                      }
+                  )
+          
+          
+          def delete_task(body):
+              task_id = body.get('task_id')
+              table.delete_item(
+                  Key={
+                      'id': task_id
+                  }
+              )
+          
+                  
+          DATA_FUNCTIONS = {
+              'search_tasks': search_tasks,
+              'get_all_tasks': get_all_tasks,
+              'create_task': create_task,
+              'get_task': get_task,
+              'add_tag': add_tag,
+              'update_task': update_task,
+              'delete_task': delete_task
+          }
+          
+          
+          def lambda_handler(event, context):
+              records = event.get('Records') 
+              if records: 
+                  event = json.loads(records[0].get('body'))
+              print('Event: ', event)
+              data_function_name = event.get('data_function')
+              body = event.get('body')
+              data_function = DATA_FUNCTIONS[data_function_name]
+              result = data_function(body)
+              return result
+    DependsOn: DataServiceLambdaRole
+
+
+# Event source mappings
+  SQSLambdaEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn:
+        Fn::GetAtt:
+          - "TaskSourceQueue"
+          - "Arn"
+      FunctionName:
+        Fn::GetAtt:
+          - "DataServiceLambdaFunction"
+          - "Arn"
+    DependsOn:
+      - TaskSourceQueue
+      - DataServiceLambdaFunction
+
+
+# DynamoDB tables
+  TaskDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "id"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "id"
+          KeyType: "HASH"
+      ProvisionedThroughput:
+        ReadCapacityUnits: "5"
+        WriteCapacityUnits: "5"
+      TableName:
+        Ref:
+          "DynamoDBTableName"
+
+
+# API Gateways
+  CFRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name:
+        Ref:
+          "APIName"
+
+
+# API Gateways Resources
+  Tasks:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId:
+        Fn::GetAtt:
+          - "CFRestApi"
+          - "RestApiId"
+      ParentId:
+        Fn::GetAtt:
+          - "CFRestApi"
+          - "RootResourceId"
+      PathPart: "tasks"
+
+  TaskId:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId:
+        Fn::GetAtt:
+          - "CFRestApi"
+          - "RestApiId"
+      ParentId:
+        Fn::GetAtt:
+          - "Tasks"
+          - "ResourceId"
+      PathPart: "{taskId}"
+
+
+# API Gateways Methods
+  TasksGet:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Fn::GetAtt:
+          - "CFRestApi"
+          - "RestApiId"
+      ResourceId:
+        Fn::GetAtt:
+          - "Tasks"
+          - "ResourceId"
+      HttpMethod: GET
+      AuthorizationType: NONE
+      RequestParameters:
+        method.request.querystring.key_word: false
+        method.request.querystring.reversed: false
+        method.request.querystring.search_by: false
+        method.request.querystring.sorted_by: false
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri:
+          Fn::Sub:
+            - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaARN}/invocations"
+            - LambdaARN:
+                Fn::GetAtt:
+                  - "ApiServiceLambdaFunction"
+                  - "Arn"
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+        RequestTemplates:
+          application/json:
+            Fn::ToJsonString:
+              "http_method": "$context.httpMethod"
+              "body":
+                  "sorted_by": "$input.params('sorted_by')"
+                  "reversed": "$input.params('reversed')"
+                  "search_by": "$input.params('search_by')"
+                  "key_word": "$input.params('key_word')"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+    DependsOn:
+      - ApiServiceLambdaFunction
+
+  TasksPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Fn::GetAtt:
+          - "CFRestApi"
+          - "RestApiId"
+      ResourceId:
+        Fn::GetAtt:
+          - "Tasks"
+          - "ResourceId"
+      HttpMethod: POST
+      AuthorizationType: NONE
+      RequestModels:
+        application/json:
+          Ref: "CfTaskModel"
+      RequestValidatorId:
+        Fn::GetAtt:
+          - "CfTaskRequestValidator"
+          - "RequestValidatorId"
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri:
+          Fn::Sub:
+            - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaARN}/invocations"
+            - LambdaARN:
+                Fn::GetAtt:
+                  - "ApiServiceLambdaFunction"
+                  - "Arn"
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+        RequestTemplates:
+          application/json:
+            Fn::ToJsonString:
+              "body": $util.escapeJavaScript($input.body)
+              "http_method": "$context.httpMethod"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+    DependsOn:
+      - ApiServiceLambdaFunction
+      - CfTaskModel
+      - CfTaskRequestValidator
+
+  TasksOptions:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      RestApiId:
+        Fn::GetAtt:
+          - "CFRestApi"
+          - "RestApiId"
+      ResourceId:
+        Fn::GetAtt:
+          - "Tasks"
+          - "ResourceId"
+      HttpMethod: OPTIONS
+      Integration:
+        IntegrationResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+            method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS,POST'"
+            method.response.header.Access-Control-Allow-Origin: "'*'"
+          ResponseTemplates:
+            application/json: ''
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        Type: MOCK
+      MethodResponses:
+      - StatusCode: 200
+        ResponseModels:
+          application/json: 'Empty'
+        ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+
+  TaskGet:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Fn::GetAtt:
+          - "CFRestApi"
+          - "RestApiId"
+      ResourceId:
+        Fn::GetAtt:
+          - "TaskId"
+          - "ResourceId"
+      HttpMethod: GET
+      AuthorizationType: NONE
+      RequestParameters:
+        method.request.path.taskId: true
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri:
+          Fn::Sub:
+            - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaARN}/invocations"
+            - LambdaARN:
+                Fn::GetAtt:
+                  - "ApiServiceLambdaFunction"
+                  - "Arn"
+        RequestParameters:
+          integration.request.path.taskId: method.request.path.taskId
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+        RequestTemplates:
+          application/json:
+            Fn::ToJsonString:
+              "id": "$input.params('taskId')"
+              "http_method": "$context.httpMethod"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+    DependsOn:
+      - ApiServiceLambdaFunction
+
+  TaskPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Fn::GetAtt:
+          - "CFRestApi"
+          - "RestApiId"
+      ResourceId:
+        Fn::GetAtt:
+          - "TaskId"
+          - "ResourceId"
+      HttpMethod: POST
+      AuthorizationType: NONE
+      RequestParameters:
+        method.request.path.taskId: true
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri:
+          Fn::Sub:
+            - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaARN}/invocations"
+            - LambdaARN:
+                Fn::GetAtt:
+                  - "ApiServiceLambdaFunction"
+                  - "Arn"
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+        RequestTemplates:
+          application/json:
+            Fn::ToJsonString:
+              "body": $util.escapeJavaScript($input.body)
+              "id": "$input.params('taskId')"
+              "http_method": "$context.httpMethod"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+    DependsOn:
+      - ApiServiceLambdaFunction
+
+  TaskPut:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Fn::GetAtt:
+          - "CFRestApi"
+          - "RestApiId"
+      ResourceId:
+        Fn::GetAtt:
+          - "TaskId"
+          - "ResourceId"
+      HttpMethod: PUT
+      AuthorizationType: NONE
+      RequestParameters:
+        method.request.path.taskId: true
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri:
+          Fn::Sub:
+            - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaARN}/invocations"
+            - LambdaARN:
+                Fn::GetAtt:
+                  - "ApiServiceLambdaFunction"
+                  - "Arn"
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+        RequestTemplates:
+          application/json:
+            Fn::ToJsonString:
+              "body": $util.escapeJavaScript($input.body)
+              "id": "$input.params('taskId')"
+              "http_method": "$context.httpMethod"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+    DependsOn:
+      - ApiServiceLambdaFunction
+
+  TaskDelete:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Fn::GetAtt:
+          - "CFRestApi"
+          - "RestApiId"
+      ResourceId:
+        Fn::GetAtt:
+          - "TaskId"
+          - "ResourceId"
+      HttpMethod: DELETE
+      AuthorizationType: NONE
+      RequestParameters:
+        method.request.path.taskId: true
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri:
+          Fn::Sub:
+            - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaARN}/invocations"
+            - LambdaARN:
+                Fn::GetAtt:
+                  - "ApiServiceLambdaFunction"
+                  - "Arn"
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+        RequestTemplates:
+          application/json:
+            Fn::ToJsonString:
+             "id": "$input.params('taskId')"
+             "http_method": "$context.httpMethod"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+    DependsOn:
+      - ApiServiceLambdaFunction
+
+  TaskOptions:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      RestApiId:
+        Fn::GetAtt:
+          - "CFRestApi"
+          - "RestApiId"
+      ResourceId:
+        Fn::GetAtt:
+          - "TaskId"
+          - "ResourceId"
+      HttpMethod: OPTIONS
+      Integration:
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'DELETE,GET,OPTIONS,POST,PUT'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+
+
+  # API Gateway models
+  CfTaskModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      RestApiId:
+        Fn::GetAtt:
+          - "CFRestApi"
+          - "RestApiId"
+      ContentType: application/json
+      Description: Schema for Tasks object
+      Name: CfTaskModel
+      Schema:
+        Fn::ToJsonString:
+          $schema: https://json-schema.org/draft/2020-12/schema
+          title: Task
+          type: object
+          properties:
+            title:
+              type: string
+            description:
+              type: string
+          required:
+            - title
+            - description
+
+
+# API Request validators
+  CfTaskRequestValidator:
+    Type: AWS::ApiGateway::RequestValidator
+    Properties:
+      Name: CfTaskRequestValidator
+      RestApiId:
+        Fn::GetAtt:
+          - "CFRestApi"
+          - "RestApiId"
+      ValidateRequestBody: true
+      ValidateRequestParameters: false
+
+
+# API Depolyments
+  CFRestApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId:
+        Fn::GetAtt:
+          - "CFRestApi"
+          - "RestApiId"
+      StageName: dev
+    DependsOn:
+      - TasksGet
+      - TasksPost
+      - TasksOptions
+      - TaskGet
+      - TaskPost
+      - TaskPut
+      - TaskDelete
+      - TaskOptions
+
+
+  # S3 Buckets
+  CfTestS3Bucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName:
+        Ref: "S3BucketName"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: ObjectWriter
+      MetricsConfigurations:
+        - Id: EntireBucket
+      WebsiteConfiguration:
+        IndexDocument: index.html
+    DeletionPolicy: Retain
+
+
+# Policies
+  CfTestBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: "CfTestS3Bucket"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action:
+              - "s3:GetObject"
+              - "s3:PutObject"
+            Resource:
+              Fn::Join:
+                - ""
+                - - "arn:aws:s3:::"
+                  - Ref: "CfTestS3Bucket"
+                  - "/*"
+
+
+# Lambda permissions
+  TasksGetLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Fn::GetAtt:
+          - "ApiServiceLambdaFunction"
+          - "Arn"
+      Principal: apigateway.amazonaws.com
+      SourceArn:
+        Fn::Sub:
+          - arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestAPIID}/*/GET/tasks
+          - RestAPIID:
+              Fn::GetAtt:
+                - "CFRestApi"
+                - "RestApiId"
+
+  TasksPostLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Fn::GetAtt:
+          - "ApiServiceLambdaFunction"
+          - "Arn"
+      Principal: apigateway.amazonaws.com
+      SourceArn:
+        Fn::Sub:
+          - arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestAPIID}/*/POST/tasks
+          - RestAPIID:
+              Fn::GetAtt:
+                - "CFRestApi"
+                - "RestApiId"
+
+  TaskGetLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Fn::GetAtt:
+          - "ApiServiceLambdaFunction"
+          - "Arn"
+      Principal: apigateway.amazonaws.com
+      SourceArn:
+        Fn::Sub:
+          - arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestAPIID}/*/GET/tasks/{taskId}
+          - RestAPIID:
+              Fn::GetAtt:
+                - "CFRestApi"
+                - "RestApiId"
+
+  TaskPostLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Fn::GetAtt:
+          - "ApiServiceLambdaFunction"
+          - "Arn"
+      Principal: apigateway.amazonaws.com
+      SourceArn:
+        Fn::Sub:
+          - arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestAPIID}/*/POST/tasks/{taskId}
+          - RestAPIID:
+              Fn::GetAtt:
+                - "CFRestApi"
+                - "RestApiId"
+
+  TaskPutLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Fn::GetAtt:
+          - "ApiServiceLambdaFunction"
+          - "Arn"
+      Principal: apigateway.amazonaws.com
+      SourceArn:
+        Fn::Sub:
+          - arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestAPIID}/*/PUT/tasks/{taskId}
+          - RestAPIID:
+              Fn::GetAtt:
+                - "CFRestApi"
+                - "RestApiId"
+  TaskDeleteLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Fn::GetAtt:
+          - "ApiServiceLambdaFunction"
+          - "Arn"
+      Principal: apigateway.amazonaws.com
+      SourceArn:
+        Fn::Sub:
+          - arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestAPIID}/*/DELETE/tasks/{taskId}
+          - RestAPIID:
+              Fn::GetAtt:
+                - "CFRestApi"
+                - "RestApiId"
+
+
+# CodeBuild projects
+  APICodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name:
+        Ref:
+          "APICodeBuildProjectName"
+      ServiceRole:
+        Fn::GetAtt:
+          - "CodeBuildRole"
+          - "Arn"
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_LAMBDA_CONTAINER
+        ComputeType: BUILD_LAMBDA_2GB
+        Image: aws/codebuild/amazonlinux-x86_64-lambda-standard:python3.12
+      Source:
+        Auth:
+          Type: OAUTH
+        BuildSpec: buildspec_api.yml
+        Location: https://github.com/AlexanderBarbashin/ToAWSLambda.git
+        Type: GITHUB
+        GitCloneDepth: 1
+      TimeoutInMinutes: 15
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+        S3Logs:
+          Status: DISABLED
+    DependsOn:
+      - CodeBuildRole
+
+  DataCodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name:
+        Ref:
+          "DataCodeBuildProjectName"
+      ServiceRole:
+        Fn::GetAtt:
+          - "CodeBuildRole"
+          - "Arn"
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_LAMBDA_CONTAINER
+        ComputeType: BUILD_LAMBDA_2GB
+        Image: aws/codebuild/amazonlinux-x86_64-lambda-standard:python3.12
+      Source:
+        Auth:
+          Type: OAUTH
+        BuildSpec: buildspec_data.yml
+        Location: https://github.com/AlexanderBarbashin/ToAWSLambda.git
+        Type: GITHUB
+        GitCloneDepth: 1
+      TimeoutInMinutes: 15
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+        S3Logs:
+          Status: DISABLED
+    DependsOn:
+      - CodeBuildRole
+
+  WebCodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name:
+        Ref:
+          "WebCodeBuildProjectName"
+      ServiceRole:
+        Fn::GetAtt:
+          - "CodeBuildRole"
+          - "Arn"
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_LAMBDA_CONTAINER
+        ComputeType: BUILD_LAMBDA_2GB
+        Image: aws/codebuild/amazonlinux-x86_64-lambda-standard:python3.12
+      Source:
+        Auth:
+          Type: OAUTH
+        BuildSpec: buildspec_web.yml
+        Location: https://github.com/AlexanderBarbashin/ToAWSLambda.git
+        Type: GITHUB
+        GitCloneDepth: 1
+      TimeoutInMinutes: 15
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+        S3Logs:
+          Status: DISABLED
+    DependsOn:
+      - CodeBuildRole
+
+# Log groups
+  APICodeBuildProjectLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupClass: STANDARD
+      LogGroupName:
+        Fn::Sub:
+          - /aws/codebuild/${APICodeBuildCFProjectName}
+          - APICodeBuildCFProjectName:
+              Ref: "APICodeBuildProjectName"
+
+  DataCodeBuildProjectLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupClass: STANDARD
+      LogGroupName:
+        Fn::Sub:
+          - /aws/codebuild/${DataCodeBuildCFProjectName}
+          - DataCodeBuildCFProjectName:
+              Ref: "DataCodeBuildProjectName"
+
+  WebCodeBuildProjectLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupClass: STANDARD
+      LogGroupName:
+        Fn::Sub:
+          - /aws/codebuild/${WebCodeBuildCFProjectName}
+          - WebCodeBuildCFProjectName:
+              Ref: "WebCodeBuildProjectName"
+
+
+# CodePipelines
+  APICodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RoleArn:
+        Fn::GetAtt:
+          - "CodePipelineRole"
+          - "Arn"
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: '1'
+                Provider: CodeStarSourceConnection
+              OutputArtifacts:
+                - Name: SourceArtifact
+              Configuration:
+                BranchName: main
+                ConnectionArn:
+                  Fn::GetAtt:
+                    - "PipelineCodeConnection"
+                    - "ConnectionArn"
+                FullRepositoryId: AlexanderBarbashin/ToAWSLambda
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: Build
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifact
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName:
+                  Ref:
+                    "APICodeBuildProjectName"
+              RunOrder: 2
+      Triggers:
+        - ProviderType: CodeStarSourceConnection
+          GitConfiguration:
+            SourceActionName: Source
+            Push:
+              - Branches:
+                  Includes:
+                    - main
+                FilePaths:
+                  Includes:
+                    - api_service/**
+      PipelineType: V2
+      ExecutionMode: QUEUED
+      ArtifactStore:
+        Type: S3
+        Location:
+          Ref: "CfTestS3Bucket"
+    DependsOn:
+      - CodePipelineRole
+      - PipelineCodeConnection
+
+  DataCodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RoleArn:
+        Fn::GetAtt:
+          - "CodePipelineRole"
+          - "Arn"
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: '1'
+                Provider: CodeStarSourceConnection
+              OutputArtifacts:
+                - Name: SourceArtifact
+              Configuration:
+                BranchName: main
+                ConnectionArn:
+                  Fn::GetAtt:
+                    - "PipelineCodeConnection"
+                    - "ConnectionArn"
+                FullRepositoryId: AlexanderBarbashin/ToAWSLambda
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: Build
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifact
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName:
+                  Ref:
+                    "DataCodeBuildProjectName"
+              RunOrder: 2
+      Triggers:
+        - ProviderType: CodeStarSourceConnection
+          GitConfiguration:
+            SourceActionName: Source
+            Push:
+              - Branches:
+                  Includes:
+                    - main
+                FilePaths:
+                  Includes:
+                    - data_service/**
+      PipelineType: V2
+      ExecutionMode: QUEUED
+      ArtifactStore:
+        Type: S3
+        Location:
+          Ref: "CfTestS3Bucket"
+    DependsOn:
+      - CodePipelineRole
+      - PipelineCodeConnection
+
+  WebCodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RoleArn:
+        Fn::GetAtt:
+          - "CodePipelineRole"
+          - "Arn"
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: '1'
+                Provider: CodeStarSourceConnection
+              OutputArtifacts:
+                - Name: SourceArtifact
+              Configuration:
+                BranchName: main
+                ConnectionArn:
+                  Fn::GetAtt:
+                    - "PipelineCodeConnection"
+                    - "ConnectionArn"
+                FullRepositoryId: AlexanderBarbashin/ToAWSLambda
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: Build
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifact
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName:
+                  Ref:
+                    "WebCodeBuildProjectName"
+              RunOrder: 2
+      Triggers:
+        - ProviderType: CodeStarSourceConnection
+          GitConfiguration:
+            SourceActionName: Source
+            Push:
+              - Branches:
+                  Includes:
+                    - main
+                FilePaths:
+                  Includes:
+                    - web/**
+      PipelineType: V2
+      ExecutionMode: QUEUED
+      ArtifactStore:
+        Type: S3
+        Location:
+          Ref: "CfTestS3Bucket"
+    DependsOn:
+      - CodePipelineRole
+      - PipelineCodeConnection
+
+# CodeConnections
+  PipelineCodeConnection:
+    Type: AWS::CodeConnections::Connection
+    Properties:
+      ConnectionName: PipelineCodeConnection
+      ProviderType: GitHub
+
+
+# SNS Topics
+  CFSNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Endpoint:
+            Ref: "SNSSubscriptionEndpoint"
+          Protocol: email
+      TopicName: CFSNSTopic
+
+
+# CW Alarms
+  CFLambdaErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions:
+        - Fn::GetAtt:
+            - "CFSNSTopic"
+            - "TopicArn"
+      AlarmName: CFLambdaErrorsAlarm
+      Dimensions:
+        - Name: "FunctionName"
+          Value:
+            Ref:
+              "ApiServiceLambdaFunction"
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Period: 3600
+      Statistic: Average
+      Threshold: 0
+    DependsOn:
+      - CFSNSTopic
+      - ApiServiceLambdaFunction
+
+  CFFailedAPICodeBuildsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions:
+        - Fn::GetAtt:
+            - "CFSNSTopic"
+            - "TopicArn"
+      AlarmName: CFFailedAPICodeBuildsAlarm
+      Dimensions:
+        - Name: "ProjectName"
+          Value:
+            Ref:
+              "APICodeBuildProjectName"
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 1
+      MetricName: FailedBuilds
+      Namespace: AWS/CodeBuild
+      Period: 300
+      Statistic: Average
+      Threshold: 1
+    DependsOn:
+      - CFSNSTopic
+
+  CFFailedDataCodeBuildsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions:
+        - Fn::GetAtt:
+            - "CFSNSTopic"
+            - "TopicArn"
+      AlarmName: CFFailedDataCodeBuildsAlarm
+      Dimensions:
+        - Name: "ProjectName"
+          Value:
+            Ref:
+              "DataCodeBuildProjectName"
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 1
+      MetricName: FailedBuilds
+      Namespace: AWS/CodeBuild
+      Period: 300
+      Statistic: Average
+      Threshold: 1
+    DependsOn:
+      - CFSNSTopic
+
+  CFFailedWebCodeBuildsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions:
+        - Fn::GetAtt:
+            - "CFSNSTopic"
+            - "TopicArn"
+      AlarmName: CFFailedWebCodeBuildsAlarm
+      Dimensions:
+        - Name: "ProjectName"
+          Value:
+            Ref:
+              "WebCodeBuildProjectName"
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 1
+      MetricName: FailedBuilds
+      Namespace: AWS/CodeBuild
+      Period: 300
+      Statistic: Average
+      Threshold: 1
+    DependsOn:
+      - CFSNSTopic
+
+  CFAPIGW4XXErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions:
+        - Fn::GetAtt:
+            - "CFSNSTopic"
+            - "TopicArn"
+      AlarmName: CFAPIGW4XXErrorAlarm
+      Dimensions:
+        - Name: "ApiName"
+          Value:
+            Ref:
+              "APIName"
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      MetricName: 4XXError
+      Namespace: AWS/ApiGateway
+      Period: 3600
+      Statistic: Average
+      Threshold: 0
+    DependsOn:
+      - CFSNSTopic
+      - ApiServiceLambdaFunction
+
+
+# Systems Manager Parameters
+  APILambdaName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: APILambdaName
+      Type: String
+      Value:
+        Fn::GetAtt:
+          - "ApiServiceLambdaFunction"
+          - "Arn"
+    DependsOn:
+      - ApiServiceLambdaFunction
+
+  DataLambdaName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: DataLambdaName
+      Type: String
+      Value:
+        Fn::GetAtt:
+          - "DataServiceLambdaFunction"
+          - "Arn"
+    DependsOn:
+      - DataServiceLambdaFunction
+
+  S3BucketNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: S3BucketName
+      Type: String
+      Value:
+        Ref: "CfTestS3Bucket"
+    DependsOn:
+      - CfTestS3Bucket
+
+
+Outputs:
+
+  # SQS Queues
+  TaskSourceQueueURL:
+    Description: "URL of task source queue"
+    Value:
+      Ref: "TaskSourceQueue"
+  SourceQueueARN:
+    Description: "ARN of task source queue"
+    Value:
+      Fn::GetAtt:
+        - "TaskSourceQueue"
+        - "Arn"
+
+  TaskDeadLetterQueueURL:
+    Description: "URL of dead-letter task queue"
+    Value:
+      Ref: "TaskDeadLetterQueue"
+  TaskDeadLetterQueueARN:
+    Description: "ARN of task dead-letter queue"
+    Value:
+      Fn::GetAtt:
+        - "TaskDeadLetterQueue"
+        - "Arn"
+
+  # IAM Roles
+  APILambdaRoleARN:
+    Description: "ARN of API lambda function role"
+    Value:
+      Fn::GetAtt:
+        - "APIServiceLambdaRole"
+        - "Arn"
+  DataLambdaRoleARN:
+    Description: "ARN of Data lambda function role"
+    Value:
+      Fn::GetAtt:
+        - "DataServiceLambdaRole"
+        - "Arn"
+  CodeBuildRoleARN:
+    Description: "ARN of code build role"
+    Value:
+      Fn::GetAtt:
+        - "CodeBuildRole"
+        - "Arn"
+  CodePipelineRoleARN:
+    Description: "ARN of code pipeline role"
+    Value:
+      Fn::GetAtt:
+        - "CodePipelineRole"
+        - "Arn"
+
+  # Lambda functions
+  APILambdaFunctionARN:
+    Description: "ARN of API lambda function"
+    Value:
+      Fn::GetAtt:
+        - "ApiServiceLambdaFunction"
+        - "Arn"
+  DataLambdaFunctionARN:
+    Description: "ARN of Data lambda function"
+    Value:
+      Fn::GetAtt:
+        - "DataServiceLambdaFunction"
+        - "Arn"
+
+  # DynamoDB tables
+  DynamoDBTableARN:
+    Description: "ARN of DynamoDB table"
+    Value:
+      Fn::GetAtt:
+        - "TaskDynamoDBTable"
+        - "Arn"
+
+  # API Gateways
+  APIGatewayID:
+    Description: "ID of API Gateway"
+    Value:
+      Fn::GetAtt:
+        - "CFRestApi"
+        - "RestApiId"
+
+  # S3 Buckets
+  WebsiteURL:
+    Value:
+      Fn::GetAtt:
+        - "CfTestS3Bucket"
+        - "WebsiteURL"
+    Description: URL for website hosted on S3
+
+  # CodeBuild projects
+  APICodeBuildProjectARN:
+    Description: "ARN of API code build project"
+    Value:
+      Fn::GetAtt:
+        - "APICodeBuildProject"
+        - "Arn"
+  DataCodeBuildProjectARN:
+    Description: "ARN of Data code build project"
+    Value:
+      Fn::GetAtt:
+        - "DataCodeBuildProject"
+        - "Arn"
+  WebCodeBuildProjectARN:
+    Description: "ARN of Web code build project"
+    Value:
+      Fn::GetAtt:
+        - "WebCodeBuildProject"
+        - "Arn"
+
+ # SNS Topics
+  TopicArn:
+    Description: The ARN of the created SNS topic
+    Value:
+      Fn::GetAtt:
+        - "CFSNSTopic"
+        - "TopicArn"
+
+  TopicName:
+    Description: The name of the created SNS topic
+    Value:
+      Fn::GetAtt:
+        - "CFSNSTopic"
+        - "TopicName"
+
+  # CW Alarms
+  LambdaErrorsAlarmARN:
+    Description: "ARN of cloudwatch lambda errors alarm"
+    Value:
+      Fn::GetAtt:
+        - "CFLambdaErrorsAlarm"
+        - "Arn"
+  APICodeBuildErrorsAlarmARN:
+    Description: "ARN of cloudwatch API code build errors alarm"
+    Value:
+      Fn::GetAtt:
+        - "CFFailedAPICodeBuildsAlarm"
+        - "Arn"
+  DataCodeBuildErrorsAlarmARN:
+    Description: "ARN of cloudwatch Data code build errors alarm"
+    Value:
+      Fn::GetAtt:
+        - "CFFailedDataCodeBuildsAlarm"
+        - "Arn"
+  WebCodeBuildErrorsAlarmARN:
+    Description: "ARN of cloudwatch Web code build errors alarm"
+    Value:
+      Fn::GetAtt:
+        - "CFFailedWebCodeBuildsAlarm"
+        - "Arn"
+  APIGatewayErrorsAlarmARN:
+    Description: "ARN of cloudwatch API Gateway errors alarm"
+    Value:
+      Fn::GetAtt:
+        - "CFAPIGW4XXErrorAlarm"
+        - "Arn"
